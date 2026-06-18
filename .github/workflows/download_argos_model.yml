@@ -1,4 +1,4 @@
-name: Download Argos model
+name: Download English-Korean translation model
 
 on:
   pull_request:
@@ -8,31 +8,26 @@ jobs:
   download:
     runs-on: ubuntu-latest
     steps:
-      - name: Download English to Korean Argos model
+      - name: Download OPUS-MT English-to-Korean model
         shell: bash
         run: |
           set -euo pipefail
-          urls=(
-            'https://argos-net.com/v1/translate-en_ko-1_1.argosmodel'
-            'https://ipfs.io/ipfs/QmWecr5i4tJNnokusm97rTUyQtUqNNPufGF7ake1hJVu6G'
-            'https://dweb.link/ipfs/QmWecr5i4tJNnokusm97rTUyQtUqNNPufGF7ake1hJVu6G'
-            'https://gateway.pinata.cloud/ipfs/QmWecr5i4tJNnokusm97rTUyQtUqNNPufGF7ake1hJVu6G'
+          python -m pip install --quiet 'huggingface_hub>=0.27,<1.0'
+          python - <<'PY'
+          from huggingface_hub import snapshot_download
+          path = snapshot_download(
+              repo_id='Helsinki-NLP/opus-mt-tc-big-en-ko',
+              local_dir='opus-mt-tc-big-en-ko',
+              local_dir_use_symlinks=False,
           )
-          for url in "${urls[@]}"; do
-            echo "Trying $url"
-            if curl -A 'Mozilla/5.0' -L --fail --retry 2 --connect-timeout 20 --max-time 600 \
-              "$url" -o translate-en_ko-1_1.argosmodel; then
-              test -s translate-en_ko-1_1.argosmodel
-              ls -lh translate-en_ko-1_1.argosmodel
-              exit 0
-            fi
-          done
-          echo 'All download sources failed' >&2
-          exit 1
+          print(path)
+          PY
+          find opus-mt-tc-big-en-ko -maxdepth 2 -type f -printf '%p %k KB\n' | sort
+          du -sh opus-mt-tc-big-en-ko
       - name: Upload model artifact
         uses: actions/upload-artifact@v4
         with:
-          name: translate-en_ko-1_1
-          path: translate-en_ko-1_1.argosmodel
+          name: opus-mt-tc-big-en-ko
+          path: opus-mt-tc-big-en-ko
           if-no-files-found: error
           retention-days: 1
