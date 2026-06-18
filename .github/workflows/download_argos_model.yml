@@ -1,0 +1,25 @@
+name: Download Argos model
+
+on:
+  push:
+    paths:
+      - '.github/workflows/download_argos_model.yml'
+  workflow_dispatch:
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download English to Korean Argos model
+        run: |
+          curl -L --fail --retry 3 \
+            'https://argosopentech.nyc3.digitaloceanspaces.com/argospm/translate-en_ko-1_1.argosmodel' \
+            -o translate-en_ko-1_1.argosmodel
+          ls -lh translate-en_ko-1_1.argosmodel
+      - name: Upload model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: translate-en_ko-1_1
+          path: translate-en_ko-1_1.argosmodel
+          if-no-files-found: error
+          retention-days: 1
