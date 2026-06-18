@@ -1,44 +1,54 @@
-name: Download English-Korean translation model
+name: Build English-Korean NLLB translation model
 
 on:
   pull_request:
   workflow_dispatch:
 
 jobs:
-  download:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Download compact OPUS-MT English-to-Korean model
+      - name: Convert NLLB distilled 600M to CTranslate2 int8
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install --quiet 'huggingface_hub>=0.27,<1.0'
-          python - <<'PY'
-          from huggingface_hub import snapshot_download
-          needed = [
-              'config.json',
-              'generation_config.json',
-              'model.safetensors',
-              'source.spm',
-              'target.spm',
-              'vocab.json',
-              'tokenizer_config.json',
-              'special_tokens_map.json',
-          ]
-          path = snapshot_download(
-              repo_id='Helsinki-NLP/opus-mt-tc-big-en-ko',
-              local_dir='opus-mt-tc-big-en-ko',
-              allow_patterns=needed,
-          )
-          print(path)
-          PY
-          find opus-mt-tc-big-en-ko -maxdepth 2 -type f -printf '%p %k KB\n' | sort
-          du -sh opus-mt-tc-big-en-ko
-      - name: Upload model artifact
+          python -m pip install --quiet 'ctranslate2>=4.5,<5' 'transformers>=4.46,<5' 'sentencepiece>=0.2' 'torch>=2.3' 'protobuf<6'
+          ct2-transformers-converter \
+            --model facebook/nllb-200-distilled-600M \
+            --output_dir nllb-200-distilled-600M-ct2-int8 \
+            --quantization int8 \
+            --copy_files tokenizer.json tokenizer_config.json special_tokens_map.json sentencepiece.bpe.model
+          du -sh nllb-200-distilled-600M-ct2-int8
+          tar -cf nllb-ct2-int8.tar nllb-200-distilled-600M-ct2-int8
+          split -b 240M -d -a 2 nllb-ct2-int8.tar nllb-ct2-int8.tar.part-
+          ls -lh nllb-ct2-int8.tar.part-*
+      - name: Upload part 00
         uses: actions/upload-artifact@v4
         with:
-          name: opus-mt-tc-big-en-ko-compact
-          path: opus-mt-tc-big-en-ko
-          if-no-files-found: error
+          name: nllb-ct2-int8-part-00
+          path: nllb-ct2-int8.tar.part-00
+          retention-days: 1
+          compression-level: 0
+      - name: Upload part 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: nllb-ct2-int8-part-01
+          path: nllb-ct2-int8.tar.part-01
+          retention-days: 1
+          compression-level: 0
+      - name: Upload part 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: nllb-ct2-int8-part-02
+          path: nllb-ct2-int8.tar.part-02
+          if-no-files-found: ignore
+          retention-days: 1
+          compression-level: 0
+      - name: Upload part 03
+        uses: actions/upload-artifact@v4
+        with:
+          name: nllb-ct2-int8-part-03
+          path: nllb-ct2-int8.tar.part-03
+          if-no-files-found: ignore
           retention-days: 1
           compression-level: 0
