@@ -9,11 +9,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download English to Korean Argos model
+        shell: bash
         run: |
-          curl -L --fail --retry 3 \
-            'https://argosopentech.nyc3.digitaloceanspaces.com/argospm/translate-en_ko-1_1.argosmodel' \
-            -o translate-en_ko-1_1.argosmodel
-          ls -lh translate-en_ko-1_1.argosmodel
+          set -euo pipefail
+          urls=(
+            'https://argos-net.com/v1/translate-en_ko-1_1.argosmodel'
+            'https://ipfs.io/ipfs/QmWecr5i4tJNnokusm97rTUyQtUqNNPufGF7ake1hJVu6G'
+            'https://dweb.link/ipfs/QmWecr5i4tJNnokusm97rTUyQtUqNNPufGF7ake1hJVu6G'
+            'https://gateway.pinata.cloud/ipfs/QmWecr5i4tJNnokusm97rTUyQtUqNNPufGF7ake1hJVu6G'
+          )
+          for url in "${urls[@]}"; do
+            echo "Trying $url"
+            if curl -A 'Mozilla/5.0' -L --fail --retry 2 --connect-timeout 20 --max-time 600 \
+              "$url" -o translate-en_ko-1_1.argosmodel; then
+              test -s translate-en_ko-1_1.argosmodel
+              ls -lh translate-en_ko-1_1.argosmodel
+              exit 0
+            fi
+          done
+          echo 'All download sources failed' >&2
+          exit 1
       - name: Upload model artifact
         uses: actions/upload-artifact@v4
         with:
