@@ -1,2 +1,2 @@
-Temporary workflow trigger for downloading the Argos English-to-Korean model.
-Retry 2.
+Temporary workflow trigger for downloading the English-to-Korean translation model.
+Retry 3: OPUS-MT.
