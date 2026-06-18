@@ -1,2 +1,2 @@
 Temporary workflow trigger for downloading the English-to-Korean translation model.
-Retry 3: OPUS-MT.
+Retry 4: compact OPUS-MT artifact.
