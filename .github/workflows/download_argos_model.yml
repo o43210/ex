@@ -8,17 +8,27 @@ jobs:
   download:
     runs-on: ubuntu-latest
     steps:
-      - name: Download OPUS-MT English-to-Korean model
+      - name: Download compact OPUS-MT English-to-Korean model
         shell: bash
         run: |
           set -euo pipefail
           python -m pip install --quiet 'huggingface_hub>=0.27,<1.0'
           python - <<'PY'
           from huggingface_hub import snapshot_download
+          needed = [
+              'config.json',
+              'generation_config.json',
+              'model.safetensors',
+              'source.spm',
+              'target.spm',
+              'vocab.json',
+              'tokenizer_config.json',
+              'special_tokens_map.json',
+          ]
           path = snapshot_download(
               repo_id='Helsinki-NLP/opus-mt-tc-big-en-ko',
               local_dir='opus-mt-tc-big-en-ko',
-              local_dir_use_symlinks=False,
+              allow_patterns=needed,
           )
           print(path)
           PY
@@ -27,7 +37,8 @@ jobs:
       - name: Upload model artifact
         uses: actions/upload-artifact@v4
         with:
-          name: opus-mt-tc-big-en-ko
+          name: opus-mt-tc-big-en-ko-compact
           path: opus-mt-tc-big-en-ko
           if-no-files-found: error
           retention-days: 1
+          compression-level: 0
