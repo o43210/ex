@@ -1,54 +1,58 @@
-name: Build English-Korean NLLB translation model
+name: Trace Hyperunit Solana destinations
 
 on:
   pull_request:
-  workflow_dispatch:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  trace:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
-      - name: Convert NLLB distilled 600M to CTranslate2 int8
+      - name: Resolve Solana transactions through Unit operations API
         shell: bash
         run: |
-          set -euo pipefail
-          python -m pip install --quiet 'ctranslate2>=4.5,<5' 'transformers>=4.46,<5' 'sentencepiece>=0.2' 'torch>=2.3' 'protobuf<6'
-          ct2-transformers-converter \
-            --model facebook/nllb-200-distilled-600M \
-            --output_dir nllb-200-distilled-600M-ct2-int8 \
-            --quantization int8 \
-            --copy_files tokenizer.json tokenizer_config.json special_tokens_map.json sentencepiece.bpe.model
-          du -sh nllb-200-distilled-600M-ct2-int8
-          tar -cf nllb-ct2-int8.tar nllb-200-distilled-600M-ct2-int8
-          split -b 240M -d -a 2 nllb-ct2-int8.tar nllb-ct2-int8.tar.part-
-          ls -lh nllb-ct2-int8.tar.part-*
-      - name: Upload part 00
+          set -u
+          SIGS=(
+            3zaZ8yTrjYSbtUjFsXUCy97Z1sfRNWVcbWCmqzqgXmY5bJYMbyHTKXt34pN8rT53XgJvPL1sZzM9MxLLzPEBXgmW
+            2pNqxPQtg9Nmif5W1xH5qFB6gHC4PLBgnYFZzkP4MwSBRhk6m5QasKGMtUkNbmRvMFoKw1XckiYikgtAhJDYnFwX
+            2kn7f9Tt7ENV5UMG2yarM1k2XHLBPqGESobsYLnZ4Cxe8t3q7AdEEh24XTghoCDgs6L2ReiYJfTBP4cYqq1EJgPT
+            29akE2Wvr1cgtyPyqTDQCHSg9S4HjNdvi9pnZobBuPc2Dc5Gh6dH6qYsnhigBsuRUPtyUL5YCoyCMSztEMSkqBrw
+            232WkmEMrVDUFpnbD61nyp1EX8nF67Dy8zb3ZevyYQoXGbdj61xQnh7j9i3mfVV5NWW9wFs7kMcNoUs4CyuVBVpW
+            4bGVBd3vm3dgYJQXbRjKDis6XarZwhjMfBYz9kb99enzT9C6jmFFuRCxfCRKY7wVqEAjgvkvDjZsMLniomW3XrdF
+            3CsNA4PaLRgN6HgkZAoCoxeL3pMEY2u3xynEkmmREAGW6FFGvez9y3hdNbvhJeNJQMJvvcgbHvRb1X2Q5stqAa82
+          )
+          : > results.jsonl
+          rpc_tx() { local sig="$1" ep body out; body=$(jq -nc --arg s "$sig" '{jsonrpc:"2.0",id:1,method:"getTransaction",params:[$s,{encoding:"jsonParsed",commitment:"confirmed",maxSupportedTransactionVersion:0}]}'); for ep in https://api.mainnet-beta.solana.com https://explorer-api.mainnet-beta.solana.com https://solana-rpc.publicnode.com; do out=$(curl -sS --fail-with-body --retry 2 --retry-delay 1 --max-time 30 -H 'content-type: application/json' -d "$body" "$ep" 2>/dev/null || true); if jq -e '.result != null' >/dev/null 2>&1 <<<"$out"; then printf '%s' "$out"; return 0; fi; done; return 1; }
+          for sig in "${SIGS[@]}"; do
+            echo "TRACE $sig"
+            tx=$(rpc_tx "$sig" || true)
+            if ! jq -e '.result != null' >/dev/null 2>&1 <<<"${tx:-}"; then jq -nc --arg s "$sig" '{signature:$s,status:"rpc_failure",destinationHyperliquidAddresses:[],matches:[]}' | tee -a results.jsonl; continue; fi
+            bt=$(jq -r '.result.blockTime // empty' <<<"$tx"); slot=$(jq -r '.result.slot // empty' <<<"$tx")
+            iso=$(date -u -d "@$bt" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)
+            transfers=$(jq -c '[.result.transaction.message.instructions[]?,.result.meta.innerInstructions[]?.instructions[]? | select(.parsed.type? | tostring | test("transfer";"i")) | {program,type:.parsed.type,source:.parsed.info.source,destination:.parsed.info.destination,lamports:.parsed.info.lamports,amount:.parsed.info.amount,tokenAmount:.parsed.info.tokenAmount,mint:.parsed.info.mint}]' <<<"$tx")
+            mapfile -t candidates < <(jq -r '.result as $r | ($r.transaction.message.accountKeys|map(if type=="object" then .pubkey else . end)) as $k | [($r.transaction.message.instructions[]?.parsed.info.destination?),($r.meta.innerInstructions[]?.instructions[]?.parsed.info.destination?),(range(0;($r.meta.postBalances|length)) as $i|select(($r.meta.postBalances[$i]//0)>($r.meta.preBalances[$i]//0))|$k[$i]),($r.meta.postTokenBalances[]?.owner?),($k[])] | .[] | select(type=="string" and length>=28 and length<=60)' <<<"$tx" | awk '!seen[$0]++')
+            match='[]'; queried='';
+            for addr in "${candidates[@]}"; do
+              resp=$(curl -sS --retry 2 --retry-delay 1 --max-time 20 "https://api.hyperunit.xyz/operations/$addr" 2>/dev/null || true)
+              found=$(jq -c --arg s "$sig" '[.operations[]? | select((.sourceTxHash==$s) or (.sourceTxHash|startswith($s+":")) or (.operationId==$s) or (.operationId|startswith($s+":")))]' <<<"$resp" 2>/dev/null || echo '[]')
+              if [[ $(jq 'length' <<<"$found") -gt 0 ]]; then match="$found"; queried="$addr"; break; fi
+            done
+            dests=$(jq -c '[.[].destinationAddress | select(.!=null and .!="")] | unique' <<<"$match")
+            status=unresolved; [[ $(jq 'length' <<<"$match") -gt 0 ]] && status=exact_match
+            jq -nc --arg s "$sig" --arg st "$status" --arg slot "$slot" --arg bt "$bt" --arg iso "$iso" --arg q "$queried" --argjson d "$dests" --argjson m "$match" --argjson t "$transfers" '{signature:$s,status:$st,slot:($slot|tonumber?),blockTime:($bt|tonumber?),blockTimeIso:$iso,queriedUnitAddress:$q,destinationHyperliquidAddresses:$d,matches:$m,transfers:$t}' | tee -a results.jsonl
+          done
+          jq -s '{method:"Solana getTransaction -> candidate Unit address -> exact sourceTxHash signature-prefix match",results:.}' results.jsonl > hyperunit_trace_results.json
+          echo TRACE_RESULT_BEGIN
+          cat results.jsonl
+          echo TRACE_RESULT_END
+      - name: Upload trace result
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nllb-ct2-int8-part-00
-          path: nllb-ct2-int8.tar.part-00
+          name: hyperunit-trace-results
+          path: hyperunit_trace_results.json
           retention-days: 1
-          compression-level: 0
-      - name: Upload part 01
-        uses: actions/upload-artifact@v4
-        with:
-          name: nllb-ct2-int8-part-01
-          path: nllb-ct2-int8.tar.part-01
-          retention-days: 1
-          compression-level: 0
-      - name: Upload part 02
-        uses: actions/upload-artifact@v4
-        with:
-          name: nllb-ct2-int8-part-02
-          path: nllb-ct2-int8.tar.part-02
-          if-no-files-found: ignore
-          retention-days: 1
-          compression-level: 0
-      - name: Upload part 03
-        uses: actions/upload-artifact@v4
-        with:
-          name: nllb-ct2-int8-part-03
-          path: nllb-ct2-int8.tar.part-03
-          if-no-files-found: ignore
-          retention-days: 1
-          compression-level: 0
